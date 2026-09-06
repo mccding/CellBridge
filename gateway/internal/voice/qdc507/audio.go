@@ -261,7 +261,23 @@ func (a *Audio) ensureRuntime(ctx context.Context) error {
 	if _, err := a.adb(ctx, transport, "shell", "test -d /sys/module/qdc507_voice || insmod "+remoteVoiceModule); err != nil {
 		return fmt.Errorf("load QDC507 voice module: %w", err)
 	}
-	ready, err := a.adb(ctx, transport, "shell", "test -e /dev/snd/pcmC0D4p && test -e /dev/snd/pcmC0D4c && test -e /dev/snd/pcmC0D5p && test -e /dev/snd/pcmC0D6c && echo ready")
+	// After a NAS reboot the module's USB stack re-enumerates; the ALSA
+	// PCM nodes may lag the ADB transport by seconds. Retry the device
+	// check rather than failing the first dial (observed 2026-09-06:
+	// fresh-boot first call → "PCM devices unavailable", then a stuck
+	// route rotate; a gateway restart hid the same race).
+	var ready string
+	for attempt := 0; attempt < 5; attempt++ {
+		ready, err = a.adb(ctx, transport, "shell", "test -e /dev/snd/pcmC0D4p && test -e /dev/snd/pcmC0D4c && test -e /dev/snd/pcmC0D5p && test -e /dev/snd/pcmC0D6c && echo ready")
+		if err == nil && strings.TrimSpace(ready) == "ready" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 	if err != nil || strings.TrimSpace(ready) != "ready" {
 		return fmt.Errorf("QDC507 VoLTE PCM devices unavailable: %w (%s)", err, ready)
 	}
