@@ -211,6 +211,15 @@ func (a *Adapter) SendSMS(ctx context.Context, destination string, payload modem
 }
 
 func (a *Adapter) ListSMS(ctx context.Context, cursor modem.SMSCursor) ([]modem.RawSMS, modem.SMSCursor, error) {
+	// Explicitly select the modem's message storage ("MT" = module phone
+	// memory). Without this, CMGL lists the *current preferred* storage
+	// (often SM/SR on QDC507), which is empty because inbound SMS lands
+	// in MT — so messages are never ingested, pushed, or deleted.
+	// Observed 2026-09-06: +CPMS showed "MT",2,23 but CMGL=4 returned
+	// nothing; user stopped receiving SMS entirely.
+	if _, err := a.client.Exchange(ctx, "AT+CPMS=\"MT\""); err != nil {
+		return nil, cursor, err
+	}
 	if _, err := a.client.Exchange(ctx, "AT+CMGF=0"); err != nil {
 		return nil, cursor, err
 	}
@@ -248,6 +257,12 @@ func (a *Adapter) ListSMS(ctx context.Context, cursor modem.SMSCursor) ([]modem.
 }
 
 func (a *Adapter) DeleteSMS(ctx context.Context, storageIndex string) error {
+	// CMGD without an explicit storage deletes from the *current
+	// preferred* storage; pin it to MT (same reason as ListSMS) so
+	// engine.go's post-ingest cleanup actually removes the message.
+	if _, err := a.client.Exchange(ctx, "AT+CPMS=\"MT\""); err != nil {
+		return err
+	}
 	if _, err := a.client.Exchange(ctx, "AT+CMGD="+strings.TrimSpace(storageIndex)); err != nil {
 		return err
 	}

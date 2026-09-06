@@ -78,13 +78,14 @@ func (r commandRunner) Run(ctx context.Context, args ...string) (string, error) 
 		// USB transport discovery is single-listener: the OS-level adb
 		// daemon (tcp:5037, auto-started by fnOS on every boot) claims
 		// the module's USB transport and a second daemon can never
-		// enumerate it. Kill any host daemon first, then run our own on
-		// the private socket. Observed 2026-09-06: NAS reboot → host
-		// daemon on 5037 → gateway voice dead until manual
-		// `adb kill-server`.
-		cleanup := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*fork-server")
+		// enumerate it. Kill ONLY the host 5037 daemon — never our own
+		// 5038 private daemon (a broad pattern like "adb.*fork-server"
+		// matches both and causes a cold-start loop: each call kills our
+		// daemon, start-server re-enumerates USB, >10s, deadline
+		// exceeded. Observed 2026-09-06 reboot).
+		cleanup := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*tcp:localhost:5037")
 		_ = cleanup.Run()
-		cleanup2 := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*nodaemon")
+		cleanup2 := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*nodaemon.*5037")
 		_ = cleanup2.Run()
 		startCtx, startCancel := context.WithTimeout(ctx, 10*time.Second)
 		startup := exec.CommandContext(startCtx, r.path, "start-server")

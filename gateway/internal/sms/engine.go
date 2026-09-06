@@ -188,21 +188,35 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration, onMessage func
 	poll := func() error {
 		e.Assembler.Prune(e.Now())
 		_ = e.Database.PrunePendingSMSSegments(ctx, e.Now().Add(-MultipartRetention))
-		messages, next, err := inbox.ListSMS(ctx, cursor)
+		// Bound every modem exchange so an unresponsive AT response can
+		// never wedge the shared serial port (and with it call setup).
+		// Observed 2026-09-06: ListSMS's AT+CPMS="MT" read blocked
+		// forever on the engine's permanent context — the i/o lock never
+		// released and every dial froze at "waiting for answered".
+		pollCtx, pollCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer pollCancel()
+		messages, next, err := inbox.ListSMS(pollCtx, cursor)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// transient timeout/AT error: skip this round, keep cursor
 			return err
 		}
 		for _, raw := range messages {
-			message, ingestErr := e.Ingest(ctx, raw)
+			delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
+			message, ingestErr := e.Ingest(delCtx, raw)
 			if ingestErr != nil {
+				delCancel()
 				continue
 			}
 			if message != nil && onMessage != nil {
 				onMessage(message)
 			}
 			if raw.ModemIndex > 0 {
-				_ = inbox.DeleteSMS(ctx, fmt.Sprint(raw.ModemIndex))
+				_ = inbox.DeleteSMS(delCtx, fmt.Sprint(raw.ModemIndex))
 			}
+			delCancel()
 		}
 		cursor = next
 		return nil
