@@ -1,0 +1,53 @@
+# Observed on the CellBridge validation NAS (Baiwang QDC507, arm64).
+# Keep the stable by-id path; do not replace it with /dev/ttyUSB2.
+network:
+  mode: tailnet
+  tailnet_hostname: cellbridge-nas.example.ts.net
+  public_fallback: false
+server:
+  listen: 127.0.0.1:8787
+  public_base_url: ""
+data:
+  dir: /var/lib/cellbridge
+modem:
+  adapter: qdc507
+  tty: /dev/serial/by-id/usb-BAIWANG_Baiwang-if02-port0
+  baud: 9600
+  allow_usb_identity_changes: false
+voice:
+  # QDC507 reports IMS/VoLTE, DTMF and QPCMV voice-control capability. Enable
+  # only after the external module-side PCM/UAC runtime passes real-call QA.
+  enabled: false
+  backend: qdc507
+  # Explicitly remains false until the fixed runtime and module ABI pass the
+  # controlled live insmod/readback/PCM validation described in the report.
+  bootstrap: false
+  codec: pcmu
+  sample_rate: 8000
+  rx_path: hw:0,0
+  tx_path: hw:0,0
+  # External user-provided, fixed-hash-verified MaVo runtime. Do not place
+  # these device-side binaries inside the CellBridge image.
+  runtime_dir: /opt/cellbridge/module-voice
+webrtc:
+  remote_ice_policy: relay
+  local_ice_policy: all
+  media_network_policy: tailnet-turn
+  turn_credential_ttl: 10m
+  private_turn:
+    enabled: true
+    host: cellbridge-nas.example.ts.net
+    port: 3478
+    bind_ip: ""
+push:
+  mode: broker
+  broker_url: https://push.example.com
+recording:
+  enabled: true
+  retention_days: 90
+  minimum_free_bytes: 524288000
+  auto_mode: off
+security:
+  pairing_local_only: true
+  admin_local_only: true
+  redact_logs: true

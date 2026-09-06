@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cellbridge.local/schema/push-broker.schema.json",
+  "title": "CellBridge Push Broker request",
+  "type": "object",
+  "required": ["deviceId", "token", "environment", "payload"],
+  "properties": {
+    "deviceId": { "type": "string", "minLength": 1 },
+    "token": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "enum": ["sandbox", "production"] },
+    "locale": { "type": "string" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

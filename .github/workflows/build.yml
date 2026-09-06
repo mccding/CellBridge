@@ -1,0 +1,109 @@
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1) 双架构二进制（arm64 + amd64），作为 Release 资产发布
+  # ------------------------------------------------------------------
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { arch: arm64,  artifact: cellbridge-gateway-linux-arm64 }
+          - { arch: amd64,  artifact: cellbridge-gateway-linux-amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build gateway (linux/${{ matrix.arch }})
+        working-directory: gateway
+        run: |
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 \
+            go build -trimpath -ldflags='-s -w' \
+            -o /tmp/${{ matrix.artifact }} ./cmd/cellbridge-gateway
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: /tmp/${{ matrix.artifact }}
+
+  # ------------------------------------------------------------------
+  # 2) Docker 双平台镜像（linux/arm64 + linux/amd64）→ GHCR
+  # ------------------------------------------------------------------
+  docker:
+    runs-on: ubuntu-latest
+    needs: [binaries]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          REF="${{ github.ref_name }}"
+          SAFE=$(echo "${REF}" | tr '/' '-')
+          echo "tag=${SAFE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: gateway/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------------
+  # 3) 把双架构二进制挂到 GitHub Release（tag 推送时）
+  # ------------------------------------------------------------------
+  release:
+    runs-on: ubuntu-latest
+    needs: [binaries]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: chmod + sha256sum
+        run: |
+          chmod +x dist/*
+          cd dist && sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/cellbridge-gateway-linux-arm64
+            dist/cellbridge-gateway-linux-amd64
+            dist/SHA256SUMS.txt
+          generate_release_notes: true

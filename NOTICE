@@ -1,0 +1,25 @@
+# CellBridge · 第三方声明 / Third-Party Notices
+
+**English:** This repository is an independent implementation of the CellBridge architecture plan.
+No source code from MacCellular, NasAnySim, or dji-4g-vohive-mac is copied into this repository.
+Review `docs/legal/dependency-matrix.md` before adding third-party code or binary assets.
+
+**简体中文：** 本仓库是基于 CellBridge 架构方案的独立实现。
+仓库中不包含 MacCellular、NasAnySim 或 dji-4g-vohive-mac 的源码。
+在加入任何第三方代码或二进制资产前，请先审阅 `docs/legal/dependency-matrix.md`。
+
+---
+
+## Dependencies / 依赖
+
+This project imports the following third-party open-source modules (see `gateway/go.mod`),
+本项目的 Go 依赖模块列表见 `gateway/go.mod`，包括但不限于：
+
+| Module | Purpose / 用途 | License |
+|---|---|---|
+| `github.com/pion/webrtc/v4` | WebRTC transport (legacy iOS app path) | MIT |
+| `github.com/gorilla/websocket` | WebSocket upgrade | BSD-2-Clause |
+| `github.com/google/uuid` | UUID generation | BSD-3-Clause |
+
+> ⚠️ The module-side voice runtime (`qdc507_aprv3.ko`, `qdc507_voice.ko`, `mavo-pcm-bridge.armv7`, `alsaucm`) is **closed-source vendor firmware** and is **not** distributed with this repository. Users must obtain it from their module vendor / hardware bundle (see `docs/CellBridge.md` §2).
+> ⚠️ 模块侧语音运行时（`qdc507_aprv3.ko`、`qdc507_voice.ko`、`mavo-pcm-bridge.armv7`、`alsaucm`）为**厂商闭源固件**，不随本仓库分发；请从模块厂商/硬件套装获取（见 `docs/CellBridge.md` §2）。

@@ -1,0 +1,48 @@
+network:
+  mode: tailnet
+  # Set this to the actual MagicDNS hostname after Tailscale enrollment.
+  tailnet_hostname: cellbridge-nas.example.ts.net
+  public_fallback: false
+server:
+  listen: 127.0.0.1:8787
+  public_base_url: ""
+data:
+  dir: /var/lib/cellbridge
+modem:
+  adapter: auto
+  tty: auto
+  baud: 9600
+  allow_usb_identity_changes: false
+voice:
+  enabled: true
+  backend: alsa
+  codec: pcmu
+  sample_rate: 8000
+  # Only for a lab/PocketBridge raw PCM endpoint; a certified UAC/ALSA
+  # adapter may use its own backend while preserving VoiceAudio.
+  rx_path: hw:0,0
+  tx_path: hw:0,0
+webrtc:
+  remote_ice_policy: relay
+  local_ice_policy: all
+  media_network_policy: tailnet-turn
+  turn_credential_ttl: 10m
+  private_turn:
+    enabled: true
+    host: cellbridge-nas.example.ts.net
+    port: 3478
+    bind_ip: ""
+push:
+  mode: broker
+  broker_url: https://push.example.com
+recording:
+  enabled: true
+  retention_days: 90
+  minimum_free_bytes: 524288000
+  # Manual recording is explicit. Automatic recording remains opt-in and is
+  # disabled until the audible consent tone path is enabled and verified.
+  auto_mode: off
+security:
+  pairing_local_only: true
+  admin_local_only: true
+  redact_logs: true

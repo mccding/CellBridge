@@ -1,0 +1,17 @@
+[Unit]
+Description=CellBridge Gateway (Tailnet-only)
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service docker.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/mnt/docker-compose/cellbridge-gateway/turn.env
+ExecStart=/mnt/docker-compose/cellbridge-gateway/bin/cellbridge-gateway --config /mnt/docker-compose/cellbridge-gateway/config.yaml --listen 127.0.0.1:8787 --data-dir /mnt/docker-compose/cellbridge-gateway/data
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

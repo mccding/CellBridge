@@ -1,0 +1,49 @@
+# ── Build artifacts (本地/CI 编译产物, 不进仓库) ──
+artifacts/
+*.ipa
+*.deb
+*.rpm
+cellbridge-gateway-linux-*
+/tmp/
+
+# ── Runtime data & secrets (运行时数据与密钥, 严禁入库) ──
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data/
+config.yaml
+config.local.yaml
+turn.env
+.env
+*.pem
+*.key
+!infra/config.example.yaml
+!infra/config.nas-qdc507.example.yaml
+
+# ── Selenoid/诊断导出 ──
+cellbridge-diagnostics.zip
+cellbridge-backup-*.zip
+
+# ── IDE / OS ──
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── Hermes 会话计划 (本机私有) ──
+.hermes/
+
+# ── 旧架构内部 QA 归档（不随开源发布；含实测号码/内部 API）──
+docs/verification/
+docs/direct-usb/
+docs/ios/
+ios/
+
+# ── Go ──
+gateway/bin/
+gateway/*.test
+gateway/*.out
+
+# ── 第三方示例代码（仅本地参考, License 不明, 不发布）──
+third_party/
+sources/

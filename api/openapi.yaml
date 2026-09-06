@@ -1,0 +1,612 @@
+openapi: 3.1.0
+info:
+  title: CellBridge Gateway API
+  version: 1.0.0
+  description: API v1 for a user-owned cellular gateway. Mutating requests require a device token and Idempotency-Key.
+servers:
+  - url: https://{gateway}/api/v1
+    variables:
+      gateway:
+        default: gateway.example.com
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /gateway:
+    get:
+      operationId: gateway
+      responses:
+        '200':
+          description: Gateway metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Gateway' }
+  /line:
+    get:
+      operationId: line
+      responses:
+        '200':
+          description: SIM and registration status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Line' }
+  /pairing/start:
+    post:
+      security: []
+      operationId: pairingStart
+      description: Local-only. Creates a short-lived pairing payload.
+      responses:
+        '200':
+          description: Pairing payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PairingStart' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /pairing/complete:
+    post:
+      security: []
+      operationId: pairingComplete
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema: { $ref: '#/components/schemas/PairingComplete' }
+      responses:
+        '200':
+          description: Device credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceCredentials' }
+  /auth/refresh:
+    post:
+      security: []
+      operationId: refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: Rotated device credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceCredentials' }
+  /sync:
+    get:
+      operationId: sync
+      parameters:
+        - { $ref: '#/components/parameters/After' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Incremental changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncResponse' }
+  /messages:
+    get:
+      operationId: messages
+      parameters:
+        - { $ref: '#/components/parameters/After' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Message' }
+    post:
+      operationId: sendMessage
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessage' }
+      responses:
+        '201':
+          description: Queued message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+  /messages/{id}/read:
+    post:
+      operationId: markMessageRead
+      parameters:
+        - { $ref: '#/components/parameters/MessageId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Marked read } }
+  /messages/{id}:
+    delete:
+      operationId: deleteMessage
+      parameters:
+        - { $ref: '#/components/parameters/MessageId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Deleted } }
+  /threads:
+    get:
+      operationId: threads
+      responses:
+        '200':
+          description: Message threads
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Thread' }
+  /calls:
+    get:
+      operationId: listCalls
+      parameters: [ { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200':
+          description: Recent calls
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Call' }
+    post:
+      operationId: dial
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DialRequest' }
+      responses:
+        '201':
+          description: Created call
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Call' }
+  /calls/{id}:
+    get:
+      operationId: getCall
+      parameters: [ { $ref: '#/components/parameters/CallId' } ]
+      responses:
+        '200':
+          description: Call
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Call' }
+  /calls/{id}/answer:
+    post:
+      operationId: answer
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Answered } }
+  /calls/{id}/reject:
+    post:
+      operationId: reject
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Rejected } }
+  /calls/{id}/hangup:
+    post:
+      operationId: hangup
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Hung up } }
+  /calls/{id}/dtmf:
+    post:
+      operationId: dtmf
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [digit]
+              properties:
+                digit: { type: string, pattern: '^[0-9*#A-D]$' }
+      responses: { '204': { description: Sent } }
+  /calls/{id}/webrtc/offer:
+    post:
+      operationId: webRTCOffer
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebRTCOffer' }
+      responses:
+        '200':
+          description: WebRTC answer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebRTCAnswer' }
+  /calls/{id}/ice:
+    get:
+      operationId: callICE
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+      responses:
+        '200':
+          description: Short-lived private Tailnet TURN configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ICEConfiguration' }
+  /calls/{id}/recording/start:
+    post:
+      operationId: startRecording
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '201':
+          description: Recording started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+  /calls/{id}/recording/stop:
+    post:
+      operationId: stopRecording
+      parameters:
+        - { $ref: '#/components/parameters/CallId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '202':
+          description: Recording finalization started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+  /recordings:
+    get:
+      operationId: listRecordings
+      parameters:
+        - { $ref: '#/components/parameters/After' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [inbound, outbound] }
+        - name: from
+          in: query
+          schema: { type: integer, description: Unix milliseconds }
+        - name: to
+          in: query
+          schema: { type: integer, description: Unix milliseconds }
+        - name: query
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Recordings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Recording' }
+  /recordings/{id}:
+    get:
+      operationId: getRecording
+      parameters: [ { $ref: '#/components/parameters/RecordingId' } ]
+      responses:
+        '200':
+          description: Recording metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+    delete:
+      operationId: deleteRecording
+      parameters:
+        - { $ref: '#/components/parameters/RecordingId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses: { '204': { description: Recording deleted } }
+  /recordings/{id}/audio:
+    get:
+      operationId: streamRecording
+      parameters: [ { $ref: '#/components/parameters/RecordingId' } ]
+      responses:
+        '206': { description: Authenticated audio range, content: { audio/mp4: { schema: { type: string, format: binary } } } }
+  /recordings/{id}/waveform:
+    get:
+      operationId: getRecordingWaveform
+      parameters: [ { $ref: '#/components/parameters/RecordingId' } ]
+      responses:
+        '200': { description: Waveform peaks, content: { application/json: { schema: { type: object } } } }
+  /settings/recording:
+    get:
+      operationId: getRecordingSettings
+      responses:
+        '200':
+          description: Recording settings and local storage usage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingSettings' }
+    put:
+      operationId: updateRecordingSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordingSettingsUpdate' }
+      responses:
+        '200':
+          description: Updated recording settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingSettings' }
+        '409': { description: Automatic recording is not certified for this Gateway }
+  /devices/{deviceId}/push:
+    put:
+      operationId: registerPush
+      parameters:
+        - { $ref: '#/components/parameters/DeviceId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushRegistration' }
+      responses: { '204': { description: Registered } }
+  /events:
+    get:
+      operationId: events
+      description: WebSocket event stream for foreground and active calls.
+      responses: { '101': { description: Switching Protocols } }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: device-access-token }
+  parameters:
+    After: { name: after, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+    MessageId: { name: id, in: path, required: true, schema: { type: string } }
+    CallId: { name: id, in: path, required: true, schema: { type: string } }
+    DeviceId: { name: deviceId, in: path, required: true, schema: { type: string } }
+    RecordingId: { name: id, in: path, required: true, schema: { type: string } }
+  responses:
+    Forbidden: { description: Forbidden }
+  schemas:
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+    Gateway:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+    Capabilities:
+      type: object
+      properties:
+        vendor: { type: string }
+        model: { type: string }
+        usbVid: { type: string }
+        usbPid: { type: string }
+        tier: { type: string, enum: [unknown, sms_only, voice_control_only, full_voice] }
+        sms: { type: boolean }
+        voice: { type: boolean }
+        dtmf: { type: boolean }
+        recording: { $ref: '#/components/schemas/RecordingCapabilities' }
+        audio:
+          type: object
+          properties:
+            backend: { type: string }
+            sampleRate: { type: integer }
+            channels: { type: integer }
+    Line:
+      type: object
+      required: [sim, registration, voice, sms]
+      properties:
+        sim: { type: string, enum: [ready, absent, locked, unknown] }
+        operator: { type: string }
+        registration: { type: string, enum: [registered, searching, denied, unknown] }
+        signal:
+          type: object
+          properties:
+            rssi: { type: integer }
+            bars: { type: integer, minimum: 0, maximum: 5 }
+        capabilityTier: { type: string, enum: [unknown, sms_only, voice_control_only, full_voice] }
+        voice: { type: string, enum: [ready, control_only, unavailable, busy] }
+        sms: { type: string, enum: [ready, unavailable, busy] }
+        activeCallId: { type: [string, 'null'], format: uuid }
+    PairingStart:
+      type: object
+      required: [gatewayId, pairingId, oneTimeSecret, expiresAt, fingerprint]
+      properties:
+        gatewayId: { type: string }
+        pairingId: { type: string }
+        oneTimeSecret: { type: string }
+        expiresAt: { type: integer }
+        fingerprint: { type: string }
+    PairingComplete:
+      type: object
+      required: [pairingId, deviceName, devicePublicKey, proof]
+      properties:
+        pairingId: { type: string }
+        deviceName: { type: string }
+        devicePublicKey: { type: string, contentEncoding: base64 }
+        proof: { type: string, contentEncoding: base64 }
+    DeviceCredentials:
+      type: object
+      required: [deviceId, accessToken, refreshToken]
+      properties:
+        deviceId: { type: string }
+        accessToken: { type: string }
+        refreshToken: { type: string }
+    Message:
+      type: object
+      required: [id, threadKey, direction, peer, body, status, createdAt]
+      properties:
+        id: { type: string }
+        threadKey: { type: string }
+        direction: { type: string, enum: [inbound, outbound] }
+        peer: { type: string }
+        body: { type: string }
+        encoding: { type: string, enum: [gsm7, ucs2] }
+        status: { type: string, enum: [queued, submitted, sent, delivered, failed, read] }
+        createdAt: { type: integer }
+    Thread:
+      type: object
+      required: [key, peer, unreadCount]
+      properties:
+        key: { type: string }
+        peer: { type: string }
+        unreadCount: { type: integer, minimum: 0 }
+        lastMessage: { $ref: '#/components/schemas/Message' }
+    SendMessage:
+      type: object
+      required: [to, body]
+      properties:
+        to: { type: string, minLength: 1, maxLength: 32 }
+        body: { type: string, minLength: 1, maxLength: 10000 }
+    DialRequest:
+      type: object
+      required: [to, clientCallId]
+      properties:
+        to: { type: string, minLength: 1, maxLength: 32 }
+        clientCallId: { type: string, format: uuid }
+    Call:
+      type: object
+      required: [id, direction, state, startedAt]
+      properties:
+        id: { type: string }
+        direction: { type: string, enum: [inbound, outbound] }
+        peer: { type: string }
+        state: { type: string, enum: [idle, incoming_ringing, outgoing_dialing, connecting, active, ending, recovering] }
+        startedAt: { type: integer }
+        connectedAt: { type: [integer, 'null'] }
+        endedAt: { type: [integer, 'null'] }
+        endReason: { type: string }
+        recordingId: { type: string }
+        recordingState: { type: string }
+        recordingDurationMs: { type: integer }
+    RecordingCapabilities:
+      type: object
+      required: [supported, manual, auto, format]
+      properties:
+        supported: { type: boolean }
+        manual: { type: boolean }
+        auto: { type: boolean }
+        format: { type: string, example: m4a-aac }
+    RecordingSettings:
+      type: object
+      required: [enabled, autoMode, retentionDays, minimumFreeBytes, usedBytes]
+      properties:
+        enabled: { type: boolean }
+        autoMode: { type: string, enum: [off, all, incoming, outgoing] }
+        retentionDays: { type: integer, minimum: 0 }
+        minimumFreeBytes: { type: integer, minimum: 0 }
+        usedBytes: { type: integer, minimum: 0 }
+    RecordingSettingsUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        autoMode: { type: string, enum: [off, all, incoming, outgoing] }
+        retentionDays: { type: integer, minimum: 0 }
+        minimumFreeBytes: { type: integer, minimum: 0 }
+    Recording:
+      type: object
+      required: [id, callId, state, triggerMode]
+      properties:
+        id: { type: string, format: uuid }
+        callId: { type: string }
+        state: { type: string, enum: [starting, recording, finalizing, ready, failed, deleted] }
+        triggerMode: { type: string, enum: [manual, auto_all, auto_incoming, auto_outgoing] }
+        startedAt: { type: integer }
+        stoppedAt: { type: integer }
+        durationMs: { type: integer }
+        container: { type: string, example: m4a }
+        codec: { type: string, example: aac-lc }
+        sampleRate: { type: integer, example: 16000 }
+        channels: { type: integer, example: 1 }
+        bitrate: { type: integer, example: 32000 }
+        sizeBytes: { type: integer }
+        sha256: { type: string }
+        waveformVersion: { type: string }
+        failureCode: { type: string }
+        failureDetail: { type: string }
+        retentionExpiresAt: { type: integer }
+        waveformPeaks:
+          type: array
+          maxItems: 256
+          items: { type: number, format: float, minimum: 0, maximum: 1 }
+    WebRTCOffer:
+      type: object
+      required: [sdp, type, transport]
+      properties:
+        sdp: { type: string }
+        type: { type: string, enum: [offer] }
+        transport: { type: string, enum: [tailnet, pocket] }
+    WebRTCAnswer:
+      type: object
+      required: [sdp, type, iceMode]
+      properties:
+        sdp: { type: string }
+        type: { type: string, enum: [answer] }
+        iceMode: { type: string, enum: [relay, all] }
+    ICEConfiguration:
+      type: object
+      required: [policy, iceServers, expiresAt]
+      properties:
+        policy: { type: string, enum: [tailnet-turn] }
+        iceServers:
+          type: array
+          items: { $ref: '#/components/schemas/ICEServer' }
+        expiresAt: { type: string, format: date-time }
+    ICEServer:
+      type: object
+      required: [urls, username, credential]
+      properties:
+        urls:
+          type: array
+          items: { type: string }
+        username: { type: string }
+        credential: { type: string }
+    PushRegistration:
+      type: object
+      required: [apnsToken, voipToken, environment, locale]
+      properties:
+        apnsToken: { type: string }
+        voipToken: { type: string }
+        environment: { type: string, enum: [sandbox, production] }
+        locale: { type: string }
+    Change:
+      type: object
+      required: [seq, type, op, id]
+      properties:
+        seq: { type: integer }
+        type: { type: string, enum: [message, call, line] }
+        op: { type: string, enum: [upsert, delete] }
+        id: { type: string }
+    SyncResponse:
+      type: object
+      required: [from, to, hasMore, changes]
+      properties:
+        from: { type: integer }
+        to: { type: integer }
+        hasMore: { type: boolean }
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/Change' }

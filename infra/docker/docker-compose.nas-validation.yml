@@ -1,0 +1,7 @@
+# Local-only NAS validation overlay. It exposes the Gateway on loopback so
+# health/auth/API checks can run without publishing an unauthenticated WAN port.
+services:
+  gateway:
+    command: ["--config", "/etc/cellbridge/config.yaml", "--listen", "127.0.0.1:18080", "--data-dir", "/var/lib/cellbridge"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18080/api/v1/health"]

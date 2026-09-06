@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">CellBridge PocketBridge on %h</name>
+  <service>
+    <type>_cellbridge._tcp</type>
+    <port>443</port>
+    <txt-record>mode=pocket</txt-record>
+    <txt-record>api=v1</txt-record>
+    <txt-record>tls=required</txt-record>
+  </service>
+</service-group>

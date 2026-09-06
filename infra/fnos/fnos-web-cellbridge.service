@@ -1,0 +1,16 @@
+[Unit]
+Description=fnOS Web management (CellBridge network-isolated coexistence)
+After=network-online.target trim_init.service
+Wants=network-online.target
+Conflicts=trim_nginx.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/fnos-web-cellbridge
+KillMode=control-group
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: gateway/Dockerfile
+      args:
+        TARGETARCH: ${TARGETARCH:-amd64}
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    image: cellbridge-gateway:${VERSION:-dev}
+    restart: unless-stopped
+    network_mode: host
+    command: ["--config", "/etc/cellbridge/config.yaml", "--listen", "127.0.0.1:8787", "--data-dir", "/var/lib/cellbridge"]
+    volumes:
+      - cellbridge-data:/var/lib/cellbridge
+      - ${CELLBRIDGE_CONFIG:-../config.example.yaml}:/etc/cellbridge/config.yaml:ro
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    # A /dev bind mount alone does not grant device-cgroup access on Docker
+    # hosts such as fnOS. Keep the app on the stable by-id path in config, but
+    # explicitly pass the resolved modem character device to the container.
+    devices:
+      - ${CELLBRIDGE_MODEM_DEVICE:-/dev/ttyUSB2}:/dev/ttyUSB2:rwm
+    environment:
+      CELLBRIDGE_PUSH_BROKER_AUTHORIZATION: ${CELLBRIDGE_PUSH_BROKER_AUTHORIZATION:-}
+      CELLBRIDGE_TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:?set TURN_AUTH_SECRET}
+    group_add:
+      - dialout
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  coturn:
+    image: coturn/coturn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --listening-port=3478
+      - --listening-ip=${TAILSCALE_IP:?set TAILSCALE_IP}
+      - --no-tls
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_AUTH_SECRET:?set TURN_AUTH_SECRET}
+      - --realm=${TURN_REALM:?set TURN_REALM}
+      - --no-cli
+      - --no-multicast-peers
+      - --no-loopback-peers
+volumes:
+  cellbridge-data:

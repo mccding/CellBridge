@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cellbridge.local/schema/push.schema.json",
+  "title": "CellBridge VoIP Push Envelope",
+  "type": "object",
+  "required": ["callUUID", "callId", "handle", "gatewayId", "issuedAt"],
+  "properties": {
+    "callUUID": { "type": "string", "format": "uuid" },
+    "callId": { "type": "string", "minLength": 1 },
+    "handle": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "gatewayId": { "type": "string", "minLength": 1 },
+    "issuedAt": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

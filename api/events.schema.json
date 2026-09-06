@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cellbridge.local/schema/events.schema.json",
+  "title": "CellBridge Event",
+  "type": "object",
+  "required": ["id", "seq", "type", "createdAt", "data"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "type": {
+      "type": "string",
+      "enum": ["line.updated", "message.created", "message.updated", "call.incoming", "call.updated", "call.ended", "recording.starting", "recording.started", "recording.finalizing", "recording.ready", "recording.failed", "recording.deleted", "gateway.warning", "gateway.restarting"]
+    },
+    "createdAt": { "type": "integer", "minimum": 0 },
+    "data": { "type": "object" }
+  },
+  "additionalProperties": false
+}
