@@ -26,6 +26,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: gateway/go.sum
 
       - name: Build gateway (linux/${{ matrix.arch }})
         working-directory: gateway
@@ -67,7 +68,11 @@ jobs:
         run: |
           REF="${{ github.ref_name }}"
           SAFE=$(echo "${REF}" | tr '/' '-')
+          # GHCR requires lowercase repository names
+          REPO_LOWER="${{ github.repository }}"
+          REPO_LOWER=$(echo "${REPO_LOWER}" | tr '[:upper:]' '[:lower:]')
           echo "tag=${SAFE}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO_LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push multi-arch image
         uses: docker/build-push-action@v6
@@ -77,8 +82,8 @@ jobs:
           platforms: linux/arm64,linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tag }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ steps.meta.outputs.repo }}:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ steps.meta.outputs.repo }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
