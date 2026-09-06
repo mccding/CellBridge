@@ -116,21 +116,9 @@ ls -l /dev/serial/by-id/ | grep -E "if0[2-9]|if03"   # 找到 ...-if02-... 或 .
 
 确定 AT 口后，下文所有 AT 命令都用 `<AT口>` 表示（如 `/dev/ttyUSB2` 或 by-id 路径）。
 
-**第二步：解锁 adb（必须先解锁，才能成功写入 usbcfg！）**
+**第二步：开启 adb + UAC（usbcfg）并重启使生效（默认直接可写，无需 key）**
 
-QDC507 的 adb 出厂被锁定（`AT+QADBKEY` 挑战机制）。**锁定状态下直接写 usbcfg 会被拒绝**，所以顺序必须是：解锁 → 写 usbcfg → 重启。
-
-```bash
-# 1. 查询 adb 是否已解锁（返回 +QADBKEY: <值> = 已解锁；返回 error/lock = 锁定）
-printf 'AT+QADBKEY?\r' > <AT口>
-
-# 2. 若锁定，用 15 字符 key 解锁（key 由厂商签发，模块绑定）：
-printf 'AT+QADBKEY="你的15字符KEY"\r' > <AT口>
-```
-
-> key 是模块绑定的 15 字符 MD5-crypt 格式，**向你的模块卖家/厂商索取**（每台模块不同）。你的模块如果之前用 MaVo 开过 adb（设置里开过"ADB"开关），说明已解锁，跳过此步。**部分固件无 QADBKEY 命令**（老固件/无锁），直接进入第三步。
-
-**第三步：开启 adb + UAC（usbcfg）并重启使生效**
+大多数模块（Baiwang 固件）**adb 直接用、不需要解锁 key**——MaVo 的一键初始化就是直接写这一步（你的模块实测 `+QADBKEY: 12345678` 返回值 = 正常可用）：
 
 ```bash
 # usbcfg 参数位：Dload,AT,Modem,NMEA,Diag,ADB,UAC —— 全 1 = 全开
@@ -138,14 +126,27 @@ printf 'AT+QCFG="usbcfg",0x2C7C,0x0125,1,1,1,1,1,1,1\r' > <AT口>
 printf 'AT+CFUN=1,1\r' > <AT口>     # 重启射频子系统（USB 重枚举，约 15s）
 ```
 
-**一键完成以上全部步骤**（自动识别 AT 口 → 检查/解锁 adb → 写 usbcfg → 重启）：
+**一键完成以上全部步骤**（自动识别 AT 口 → 检查 adb 状态 → 写 usbcfg → 重启）：
 
 ```bash
-./scripts/init-module.sh                       # 一键初始化
+./scripts/init-module.sh                       # 一键初始化（默认无需 key）
 ./scripts/init-module.sh /dev/ttyUSB2          # 指定 AT 口
-ADB_KEY=<你的15字符key> ./scripts/init-module.sh  # 提供 key 自动解锁
+ADB_KEY=<你的15字符key> ./scripts/init-module.sh  # 仅特殊锁定模块需要
 ./scripts/init-module.sh --check               # 只查状态不写
 ```
+
+**仅当写入被拒（返回 ERROR/lock）时**——极少数模块（如 DJI 原厂锁定的批次）adb 被 QADBKEY 挑战锁住，锁定状态下写 usbcfg 会失败。此时才需要厂商签发的 **15 字符 key**（MD5-crypt 格式、模块绑定）：
+
+```bash
+# 1. 查询（若返回 ERROR/challenge 而非 +QADBKEY: <值>，说明被锁定）
+printf 'AT+QADBKEY?\r' > <AT口>
+
+# 2. 用 key 解锁后重新写 usbcfg：
+printf 'AT+QADBKEY="你的15字符KEY"\r' > <AT口>
+printf 'AT+QCFG="usbcfg",0x2C7C,0x0125,1,1,1,1,1,1,1\r' > <AT口>
+```
+
+> key 向你的模块卖家/厂商索取（每台模块不同）。**大多数用户永远用不到这一步**——先按上方的"默认直接写"走，报错再来这里。
 
 重启后验证（应出现 adb 端口 + 音频设备）：
 
