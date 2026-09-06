@@ -222,7 +222,21 @@ go test ./...        # 覆盖：RTP 时序、SIP 重传去重、SMS dry-run(CMGW
 
 ## 5. 部署到 NAS
 
-### 5.1 目录与 systemd 服务（非 Docker 直装，实测路径）
+### 5.0 一键部署（推荐，唯一必须的命令）
+
+仓库自带 `scripts/deploy.sh`——**编译 → 备份 → 上传 → 替换 → 重启 → 验证** 一条命令完成：
+
+```bash
+./scripts/deploy.sh                      # 默认部署到 nasanysim（tailnet SSH）
+NAS_HOST=my-nas ./scripts/deploy.sh      # 指定 NAS 主机名
+./scripts/deploy.sh --no-build           # 跳过编译，只上传已有产物
+```
+
+前置条件：本机已加入 tailnet 且 `tailscale ssh root@<NAS>` 可用。部署前脚本自动把 NAS 上当前运行的二进制备份为 `.pre-deploy-<时间戳>`，失败可随时回滚。
+
+### 5.1 手动部署（了解细节用）
+
+目录与 systemd 服务（非 Docker 直装，实测路径）：
 
 ```bash
 # NAS 上
