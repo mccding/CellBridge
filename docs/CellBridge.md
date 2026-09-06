@@ -584,6 +584,8 @@ journalctl -u cellbridge-gateway -f | grep 'voice cellular stats'
 | 16 | 短号短信 PDU 卡 `>` 提示符 | 输入提示符被 tty 抢占 | ≤6 位短号走 AT+CMGF=1 文本模式 |
 | 17 | SDP c= 写公网 IP → RTP 发去公网回不来 | YakPhone SDP 使用家宽出口地址 | RTP 目的=INVITE 源 IP+SDP 端口 |
 | 18 | 振铃中 180 后无 200 | 多轮叠加：路由回收时机/pid 转义/killall 残留/routePrepared 短路 | 前述 7/9/10 组合修复 |
+| 19 | 通话中"断断续续"（3-7 秒静音+突发补音） | iPhone RTP 经 Tailscale 的秒级毛刺 → aplay 瞬时饥饿 → **UAC ADAPTIVE 播放时钟停摆 → ASYNC 下行 capture 被节流**（50 帧窗口耗时 3-7 秒） | **上行 jitter buffer**：RTP 帧进 50 帧环形队列，固定 20ms 节拍器平滑写入 aplay；队列空写静音防 XRUN，满则丢最旧帧限延迟（bridge.go） |
+| 20 | 蜂窝方向偶发丢帧（帧率掉到 ~19fps） | UAC ASYNC capture 抖动超 ALSA 默认缓冲 | arecord/aplay 加 `--buffer-size=8192 --period-size=1024`（chan-quectel 同参数，60s 实测零丢帧） |
 
 ---
 
