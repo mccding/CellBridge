@@ -65,7 +65,7 @@ func TestVerifiedCallAdapterRequiresRadioTruth(t *testing.T) {
 	script := `#!/bin/sh
 while IFS= read -r line; do
   case "$line" in
-    "dial 18551188565")
+    "dial 13800138000")
       printf '%s\n' 'SUCCESS (UNCONDITIONAL)' '[NOTIFICATION]' 'call state ORIGINATION' '[NOTIFICATION]' 'call state ALERTING' '[NOTIFICATION]' 'call state CONVERSATION'
       ;;
     call_end)
@@ -82,7 +82,7 @@ done
 	}
 
 	adapter := SimpleRILAdapter{Path: program, Timeout: time.Second, EnableVerifiedCall: true}
-	call, err := adapter.Dial(context.Background(), "18551188565")
+	call, err := adapter.Dial(context.Background(), "13800138000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ done
 	}
 
 	adapter := SimpleRILAdapter{Path: program, Timeout: time.Second, EnableVerifiedSMS: true}
-	if err := adapter.SendSMS(context.Background(), "18551188565", "你好"); err != nil {
+	if err := adapter.SendSMS(context.Background(), "13800138000", "你好"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -146,7 +146,7 @@ done
 	}
 
 	adapter := SimpleRILAdapter{Path: program, Timeout: time.Second, EnableVerifiedSMS: true}
-	err := adapter.SendSMS(context.Background(), "18551188565", "你好")
+	err := adapter.SendSMS(context.Background(), "13800138000", "你好")
 	if err == nil || !strings.Contains(err.Error(), "RESULT CODE 1") || !strings.Contains(err.Error(), "CAUSE CODE 42") || !strings.Contains(err.Error(), "ERROR CLASS 3") {
 		t.Fatalf("SMS error = %v", err)
 	}
