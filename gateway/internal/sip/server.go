@@ -250,16 +250,23 @@ func (s *Server) handleInvite(msg string, remote *net.UDPAddr) {
  if rtpPort != 0 { _ = media.SetRemote(fmt.Sprintf("%s:%d", remote.IP.String(), rtpPort)) }
 
  s.sendResponse(remote, msg, 100, "Trying", "", "")
- sess := NewSIPCallSession(callID, peer, "outbound", s.modem, s.audio, media)
- if err := sess.Dial(); err != nil {
-  slog.Warn("sip invite dial failed", "err", err)
-  s.sendResponse(remote, msg, 500, "Server Error", "", "")
-  s.sessions.Delete(callID)
-  _ = media.Close()
-  return
- }
- s.sessions.Store(callID, sess)
- s.sendResponse(remote, msg, 180, "Ringing", "Contact: <sip:cellbridge@"+s.nasIP()+">\r\n", "")
+ 	sess := NewSIPCallSession(callID, peer, "outbound", s.modem, s.audio, media)
+ 	// Send 180 Ringing BEFORE dialing: the modem dial path includes a
+ 	// per-call QDC507 route rotation (2-9s) + ATD. YakPhone shows the
+ 	// caller "ringing" only after it receives 180, so a late 180 made
+ 	// every call feel like "waits forever before ringing" after a NAS
+ 	// reboot (observed 2026-09-06: dialing→180 gap ~9s on first call).
+ 	// 180 is provisional and carries no SDP, so it is safe to send
+ 	// before the cellular leg is ready.
+ 	s.sendResponse(remote, msg, 180, "Ringing", "Contact: <sip:cellbridge@"+s.nasIP()+">\r\n", "")
+ 	if err := sess.Dial(); err != nil {
+ 		slog.Warn("sip invite dial failed", "err", err)
+ 		s.sendResponse(remote, msg, 500, "Server Error", "", "")
+ 		s.sessions.Delete(callID)
+ 		_ = media.Close()
+ 		return
+ 	}
+ 	s.sessions.Store(callID, sess)
  go func() {
   answerCtx, cancel := context.WithTimeout(context.Background(), answerTimeout)
   defer cancel()
