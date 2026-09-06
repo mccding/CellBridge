@@ -108,15 +108,44 @@ printf 'AT+CFUN=1,1\r' > /dev/ttyUSB2     # 重启射频子系统使配置生效
 
 ## 3. Tailscale 组网
 
-1. NAS 与 iPhone 都安装 Tailscale，登录**同一 tailnet 账号**。
-2. 记录两台机器的 tailnet IP：
+### 3.1 NAS 安装并登录（Tailscale authkey 步骤）
 
 ```bash
-tailscale ip -4        # NAS 侧执行，记录你的 tailnet IP
+# 1. NAS 安装 Tailscale（fnOS/Debian 系）:
+#    curl -fsSL https://tailscale.com/install.sh | sh
+#    或按 https://tailscale.com/download 对应发行版安装
+
+# 2. 获取 authkey（登录凭据）:
+#    Tailscale Admin Console → Settings → Keys → Generate auth key
+#    → 复制生成的 `tskey-auth-...` 一次性密钥
+
+# 3. 用 authkey 登录你的 tailnet（只执行一次）:
+tailscale up --authkey=tskey-auth-XXXX --hostname cellbridge-nas
+
+# 4. 验证已上线并记录 tailnet IP:
+tailscale status
+tailscale ip -4        # 记录，例：100.x.y.z（下文配置用域名代替）
 ```
 
-3. 用 MagicDNS 域名（`*.ts.net`）配置 SIP，比裸 IP 稳定。
-4. 默认 tailnet 内直连即可，**不需要任何 ACL 修改**。
+### 3.2 iPhone 安装并登录
+
+1. App Store 安装 **Tailscale**，登录**同一个 tailnet 账号**（与 NAS 同一账号；authkey 只在 NAS 用一次，iPhone 用账号密码登录即可）。
+2. 验证：iPhone Tailscale App 显示两台设备在线。
+
+### 3.3 启用 MagicDNS（必须，SIP 配置依赖域名）
+
+Tailscale Admin Console → **DNS** → 勾选 **MagicDNS** 开启。
+
+> 域名格式：`<主机名>.<tailnet名>.ts.net`（例：`cellbridge-nas.<你的tailnet>.ts.net`）。下文所有 `<你的NAS>.ts.net` 都指它。
+
+### 3.4 网络检查
+
+1. 从 iPhone Ping 通 NAS 域名：
+   ```bash
+   # iPhone 上（或任意 tailnet 内机器）
+   ping cellbridge-nas.<你的tailnet>.ts.net
+   ```
+2. 默认 tailnet 内直连即可，**不需要任何 ACL 修改**。
 
 > 为什么不加 TURN：tailnet 内两台设备直连，无 NAT 无中继，`turn:` 留空即可。旧 WebRTC 时代的 coturn:3478 是遗留，本链路不用。
 
@@ -294,6 +323,18 @@ ssh root@<NAS> '
 
 ## 6. config.yaml 与 SIP 参数
 
+### 6.0 用户必填项（三个凭据，缺一不可）
+
+创建 `config.yaml` 前，先备齐下列三个值——**它们全部来自你自己，仓库不提供**：
+
+| # | 凭据 | 从哪里获取 | 填到 config 哪里 |
+|---|---|---|---|
+| 1 | **NAS ts.net 域名** | §3.3 MagicDNS 开启后，NAS 上 `tailscale status` 显示的 `<主机名>.<tailnet名>.ts.net` | `network.tailnet_hostname` |
+| 2 | **SIP 账号+密码** | **自己定**（示例 `1001`；密码自定义，之后必须原样填进 YakPhone） | `sip.users[0].username/password` |
+| 3 | **YakPhone push token** | **YakPhone App 内获取**：打开 Yak → 设置/账号页 → 复制 PushKit token（一串 Base64 字符） | `sip.push_token` |
+
+> ⚠️ 三个值都属私有凭据：不要提交到 git、不要截图外发。YakPhone token 不填则**来电和短信不会推送**（App 未打开时无法振铃）。
+
 **实测最终配置**（部署在 NAS `/mnt/docker-compose/cellbridge-gateway/config.yaml`；`push_token` 处放你自己的 YakPhone 推送 token）：
 
 ```yaml
@@ -368,13 +409,16 @@ security:
 
 1. App Store 安装 **Yak – AI SIP Phone**（baresip 内核）：
    👉 [https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863](https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863)（免费）
-2. 账号设置：
+2. **获取 PushKit token（配置 NAS 前先做这一步）**：
+   YakPhone → 设置（Settings）→ 账号/推送（Push）页 → **复制 Push Token**（一串 Base64 字符，形如 `AAA...==`）→ 填到 NAS `config.yaml` 的 `sip.push_token`。
+   > 若 App 内找不到该页：在 Yak 设置里找 "PushKit" 或 "APNs Token" 字样；不同版本入口名称可能略有差异。
+3. 账号设置：
    - **服务器**：`<你的NAS>.ts.net:5060`
    - **用户名**：`1001`；**密码**：与 config 一致
    - **传输**：UDP
    - **Codec 顺序**：PCMU（或 G711u）优先；第一阶段**不要用 Opus**
-3. 注册成功后拨号界面出现"已注册"状态。
-4. 短信：在 YakPhone 会话/消息界面输入**完整手机号**（如 `13800138000`）和内容发送——YakPhone 走 **SIP MESSAGE** 到 NAS，由 NAS 转 AT+CMGS 真发。
+4. 注册成功后拨号界面出现"已注册"状态。
+5. 短信：在 YakPhone 会话/消息界面输入**完整手机号**（如 `13800138000`）和内容发送——YakPhone 走 **SIP MESSAGE** 到 NAS，由 NAS 转 AT+CMGS 真发。
 
 > 若拨号/短信按钮无反应：确认 NAS 侧 `journalctl -u cellbridge-gateway -f` 能看到 `sip register user=1001`；看不到说明注册没到 NAS（排查网段/防火墙）。
 
