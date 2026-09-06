@@ -115,8 +115,8 @@ func (a *ALSAAudio) Start(ctx context.Context, callID modem.CallID) error {
 	if rx != nil { _ = rx.Close() }
 	if tx != nil { _ = tx.Close() }
 
-	newCapture := exec.Command("arecord", "-q", "-D", a.captureDevice, "-t", "raw", "-f", "S16_LE", "-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels))
-	newPlayback := exec.Command("aplay", "-q", "-D", a.playbackDevice, "-t", "raw", "-f", "S16_LE", "-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels))
+	newCapture := exec.Command("arecord", "-q", "-D", a.captureDevice, "-t", "raw", "-f", "S16_LE", "-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels), "--buffer-size=8192", "--period-size=1024")
+	newPlayback := exec.Command("aplay", "-q", "-D", a.playbackDevice, "-t", "raw", "-f", "S16_LE", "-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels), "--buffer-size=8192", "--period-size=1024")
 	newCapture.Stderr = io.Discard
 	newPlayback.Stderr = io.Discard
 	newRx, err := newCapture.StdoutPipe()
