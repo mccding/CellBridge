@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue)](.github/workflows/build.yml)
 
-**[简体中文](README.zh-CN.md) · [中文入口](README.md)**
+**[简体中文](README.md) (default)**
 
 </div>
 
