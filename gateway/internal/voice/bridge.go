@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/cellbridge/cellbridge/gateway/internal/modem"
 )
@@ -33,8 +34,11 @@ type Bridge struct {
 	clientPeakMax     int
 	cellularNonZero   uint64
 	clientNonZero     uint64
+	clientQueue       [][]int16
 	cellularSum       uint64
 	clientSum         uint64
+	cellularWindowAt  time.Time
+	clientWindowAt    time.Time
 	mu                sync.Mutex
 }
 
@@ -60,6 +64,7 @@ func (b *Bridge) Start(ctx context.Context, callID modem.CallID) error {
 	b.callID = callID
 	b.clientFrameSeen = false
 	b.cellularFrameSeen = false
+	b.clientQueue = nil
 	b.mu.Unlock()
 	b.media.OnPCMUFrame(func(frame []byte) {
 		if len(frame) != FrameSamples {
@@ -85,8 +90,11 @@ func (b *Bridge) Start(ctx context.Context, callID modem.CallID) error {
 		if cpeak > b.clientPeakMax { b.clientPeakMax = cpeak }
 		if cpeak > 0 { b.clientNonZero++ }
 		b.clientSum += uint64(cpeak)
-		if b.clientFrames%250 == 0 {
-			slog.Info("voice client stats", "call_id", callID, "frames", b.clientFrames, "peak_max", b.clientPeakMax, "nonzero", b.clientNonZero, "mean", b.clientSum/uint64(b.clientFrames))
+		if b.clientFrames%50 == 0 {
+			now := time.Now()
+			elapsed := now.Sub(b.clientWindowAt)
+			b.clientWindowAt = now
+			slog.Info("voice client stats", "call_id", callID, "frames", b.clientFrames, "peak_max", b.clientPeakMax, "nonzero", b.clientNonZero, "mean", b.clientSum/uint64(b.clientFrames), "win_ms", elapsed.Milliseconds())
 			b.clientPeakMax = 0
 		}
 		clientHook := b.clientFrame
@@ -94,12 +102,70 @@ func (b *Bridge) Start(ctx context.Context, callID modem.CallID) error {
 		if clientHook != nil {
 			clientHook(pcm)
 		}
-		if err := b.writePCM(pcm); err != nil {
-			slog.Warn("voice modem playback failed", "call_id", callID, "error", err)
-		}
+		// Jitter buffer (2026-09-06): enqueue the decoded frame; a fixed
+		// 20ms ticker drains it into aplay so playback never stalls.
+		// Without this, iPhone RTP bursts/stalls propagate through the
+		// UAC ADAPTIVE playback clock and choke the ASYNC capture side
+		// (observed: 50-frame windows taking 3-7s, then burst refills).
+		b.enqueueClient(pcm)
 	})
 	go b.readLoop(ctx, callID)
+	go b.clientPlaybackLoop(ctx, callID)
 	return nil
+}
+
+// clientQueue holds decoded upstream frames between the RTP callback and
+// the fixed-rate playback ticker. Capacity is deliberate: keep at least
+// 3 frames so a 60ms network stall never starves aplay, and drop the
+// oldest frame when full so end-to-end latency cannot grow unbounded.
+const (
+	clientQueueSize = 50 // 1s @ 20ms — plenty of headroom for Wi-Fi jitter
+)
+
+func (b *Bridge) enqueueClient(pcm []int16) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.clientQueue) >= clientQueueSize {
+		// drop oldest to bound latency
+		copy(b.clientQueue, b.clientQueue[1:])
+		b.clientQueue = b.clientQueue[:len(b.clientQueue)-1]
+	}
+	frame := make([]int16, len(pcm))
+	copy(frame, pcm)
+	b.clientQueue = append(b.clientQueue, frame)
+}
+
+// clientPlaybackLoop drains the jitter queue at a fixed 20ms cadence,
+// writing silence when the queue is empty (keeps UAC playback RUNNING
+// and the full-duplex clock moving — no XRUN, no capture stall).
+func (b *Bridge) clientPlaybackLoop(ctx context.Context, callID modem.CallID) {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	silence := make([]int16, FrameSamples)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.mu.Lock()
+			if !b.started {
+				b.mu.Unlock()
+				return
+			}
+			var frame []int16
+			if len(b.clientQueue) > 0 {
+				frame = b.clientQueue[0]
+				b.clientQueue = b.clientQueue[1:]
+			}
+			b.mu.Unlock()
+			if frame == nil {
+				frame = silence
+			}
+			if err := b.writePCM(frame); err != nil {
+				slog.Warn("voice modem playback failed", "call_id", callID, "error", err)
+			}
+		}
+	}
 }
 
 func (b *Bridge) readLoop(ctx context.Context, callID modem.CallID) {
@@ -139,8 +205,11 @@ func (b *Bridge) readLoop(ctx context.Context, callID modem.CallID) {
 		if peak > b.cellularPeakMax { b.cellularPeakMax = peak }
 		if peak > 0 { b.cellularNonZero++ }
 		b.cellularSum += uint64(peak)
-		if b.cellularFrames%250 == 0 {
-			slog.Info("voice cellular stats", "call_id", callID, "frames", b.cellularFrames, "peak_max", b.cellularPeakMax, "nonzero", b.cellularNonZero, "mean", b.cellularSum/uint64(b.cellularFrames))
+		if b.cellularFrames%50 == 0 {
+			now := time.Now()
+			elapsed := now.Sub(b.cellularWindowAt)
+			b.cellularWindowAt = now
+			slog.Info("voice cellular stats", "call_id", callID, "frames", b.cellularFrames, "peak_max", b.cellularPeakMax, "nonzero", b.cellularNonZero, "mean", b.cellularSum/uint64(b.cellularFrames), "win_ms", elapsed.Milliseconds())
 			b.cellularPeakMax = 0
 		}
 		b.mu.Unlock()
