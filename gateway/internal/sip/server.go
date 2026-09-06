@@ -214,6 +214,24 @@ func (s *Server) handleRegister(msg string, remote *net.UDPAddr) {
  slog.Info("sip register", "user", username, "contact", contact, "expires", expires)
 }
 
+// reapStaleSessions hangs up and removes every lingering call session.
+// Called before each outbound dial so a vanished client (no BYE ever
+// arrives) cannot permanently pin the single QDC507 audio device.
+func (s *Server) reapStaleSessions() {
+	var stale []string
+	s.sessions.Range(func(key, value any) bool {
+		stale = append(stale, key.(string))
+		return true
+	})
+	for _, id := range stale {
+		if sess, ok := s.sessions.Load(id); ok {
+			slog.Warn("reaping stale call session", "call", id)
+			_ = sess.(*SIPCallSession).Hangup()
+			s.sessions.Delete(id)
+		}
+	}
+}
+
 // handleInvite implements §20: invite -> 100 -> modem dial -> 180 -> wait
 // cellular answer (PCM RUNNING) -> 200 OK. Retransmissions of the same
 // Call-ID answer with current state, never a second dial.
@@ -250,6 +268,13 @@ func (s *Server) handleInvite(msg string, remote *net.UDPAddr) {
  if rtpPort != 0 { _ = media.SetRemote(fmt.Sprintf("%s:%d", remote.IP.String(), rtpPort)) }
 
  s.sendResponse(remote, msg, 100, "Trying", "", "")
+ 	// Reap any stale sessions BEFORE dialing. A client that vanished
+ 	// (app killed, network drop) never sends BYE, so its bridge keeps
+ 	// owning the QDC507 audio device forever and every later call dies
+ 	// at bridge.Start with "QDC507 audio is already active for call…".
+ 	// Observed 2026-09-06: a probe script that sent INVITE without BYE
+ 	// blocked all subsequent calls.
+ 	s.reapStaleSessions()
  	sess := NewSIPCallSession(callID, peer, "outbound", s.modem, s.audio, media)
  	// Send 180 Ringing BEFORE dialing: the modem dial path includes a
  	// per-call QDC507 route rotation (2-9s) + ATD. YakPhone shows the
