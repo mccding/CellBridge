@@ -207,7 +207,12 @@ func main() {
 					Bootstrap:  settings.Voice.Bootstrap,
 				})
 				if audioErr == nil {
-					probeContext, probeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+					// Cold start of the private adb daemon + module USB
+					// re-enumeration can take >10s after a NAS reboot;
+					// give the probe enough room (transportID retries
+					// internally). Observed 2026-09-06: 8s was too short
+					// and voice degraded to control-only at boot.
+					probeContext, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 					voiceAudioCapabilities, audioErr = voiceAudio.Probe(probeContext)
 					probeCancel()
 				}

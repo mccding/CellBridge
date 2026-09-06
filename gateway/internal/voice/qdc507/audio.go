@@ -65,9 +65,59 @@ type Runner interface {
 
 type commandRunner struct{ path string }
 
+// adbServerSocket pins every adb invocation to a private server socket
+// instead of the host's shared tcp:5037 daemon. After a NAS reboot the
+// OS-level adb daemon can mis-enumerate a ghost "emulator-XXXX" host
+// transport, which wedges the shared server (observed 2026-09-06: all
+// dials frozen until `adb kill-server`). A dedicated socket keeps the
+// QDC507 transport list deterministic regardless of host daemon state.
+const adbServerSocket = "tcp:localhost:5038"
+
 func (r commandRunner) Run(ctx context.Context, args ...string) (string, error) {
-	output, err := exec.CommandContext(ctx, r.path, args...).CombinedOutput()
+	if isADBServerInvocation(args) {
+		// USB transport discovery is single-listener: the OS-level adb
+		// daemon (tcp:5037, auto-started by fnOS on every boot) claims
+		// the module's USB transport and a second daemon can never
+		// enumerate it. Kill any host daemon first, then run our own on
+		// the private socket. Observed 2026-09-06: NAS reboot → host
+		// daemon on 5037 → gateway voice dead until manual
+		// `adb kill-server`.
+		cleanup := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*fork-server")
+		_ = cleanup.Run()
+		cleanup2 := exec.CommandContext(ctx, "pkill", "-f", "[a]db.*nodaemon")
+		_ = cleanup2.Run()
+		startCtx, startCancel := context.WithTimeout(ctx, 10*time.Second)
+		startup := exec.CommandContext(startCtx, r.path, "start-server")
+		startup.Env = append(startup.Env, "ADB_SERVER_SOCKET="+adbServerSocket)
+		startup.Env = append(startup.Env, "HOME=/root")
+		if _, err := startup.CombinedOutput(); err != nil {
+			slog.Warn("adb start-server (private socket)", "error", err)
+		}
+		startCancel()
+	}
+	cmd := exec.CommandContext(ctx, r.path, args...)
+	if isADBServerInvocation(args) {
+		cmd.Env = append(cmd.Env, "ADB_SERVER_SOCKET="+adbServerSocket)
+		cmd.Env = append(cmd.Env, "HOME=/root")
+		// Pin the client to our private server via -L (no env-var
+		// dependency, no ADB_TRACE flag which this adb build rejects).
+		cmd.Args = append([]string{r.path, "-L", adbServerSocket}, args...)
+	}
+	output, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(output)), err
+}
+
+// isADBServerInvocation reports whether args begin an adb client call that
+// needs the private server socket (any argument form; the path is adb).
+func isADBServerInvocation(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "devices", "shell", "push", "pull", "-t", "kill-server", "start-server", "wait-for-device":
+		return true
+	}
+	return false
 }
 
 // Audio wraps host ALSA with the QDC507 module-side bootstrap. Bootstrap is
@@ -429,11 +479,29 @@ func (a *Audio) transportID(ctx context.Context) (string, error) {
 	if usbPath == "" {
 		return "", fmt.Errorf("QDC507 USB parent not found in %s", sysfsPath)
 	}
-	devices, err := a.run.Run(ctx, "devices", "-l")
-	if err != nil {
-		return "", fmt.Errorf("list ADB devices for USB path %s: %w (%s)", usbPath, err, devices)
+	// The private adb daemon (ADB_SERVER_SOCKET) starts async to the
+	// module's first enumeration; retry briefly so a fresh-boot probe
+	// doesn't degrade voice to control-only (observed 2026-09-06).
+	var transport string
+	for attempt := 0; attempt < 8; attempt++ {
+		devices, lerr := a.run.Run(ctx, "devices", "-l")
+		if lerr != nil {
+			return "", fmt.Errorf("list ADB devices for USB path %s: %w (%s)", usbPath, lerr, devices)
+		}
+		transport, err = SelectTransportID(devices, usbPath)
+		if err == nil {
+			return transport, nil
+		}
+		if ctx.Err() != nil {
+			return "", err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(750 * time.Millisecond):
+		}
 	}
-	return SelectTransportID(devices, usbPath)
+	return "", err
 }
 
 func (a *Audio) adb(ctx context.Context, transport string, args ...string) (string, error) {
