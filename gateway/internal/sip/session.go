@@ -40,6 +40,18 @@ func (s *SIPCallSession) Dial() error {
 	s.mu.Unlock()
 	slog.Info("sip session dialing", "id", s.ID, "peer", s.Peer, "dir", s.Direction)
 	if s.Direction == "outbound" {
+		// Order matters after a NAS reboot: the module's internal
+		// system boots minutes AFTER the NAS (USB re-enumeration +
+		// Android userspace). Querying adb (route rotation below) or
+		// issuing ATD before the module answers burns the dial budget
+		// and returns a 500 to the SIP client. So: 1) wait for the AT
+		// channel, 2) rotate the voice route (adb is up by then), 3) ATD.
+		waitCtx, waitCancel := context.WithTimeout(s.ctx, 150*time.Second)
+		if err := s.modem.WaitReady(waitCtx); err != nil {
+			waitCancel()
+			return fmt.Errorf("modem not ready: %w", err)
+		}
+		waitCancel()
 		// Recycle the QDC507 UAC route BEFORE dialing: a route session left
 		// over from a previous call keeps hw:0,4 RUNNING with a stale USB
 		// stream, and any capture opened against it reads silence. The

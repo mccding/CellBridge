@@ -55,7 +55,7 @@ func IsFinal(line string) bool {
 type Client struct {
 	port       io.ReadWriteCloser
 	mu         sync.Mutex
-	ioMu       sync.Mutex
+	ioCh       chan struct{}
 	pollParser Parser
 	lineHandle func(string)
 	// DryRun makes SMS submissions use AT+CMGW (store-only) instead of
@@ -65,7 +65,26 @@ type Client struct {
 	DryRun bool
 }
 
-func NewClient(port io.ReadWriteCloser) *Client { return &Client{port: port} }
+func NewClient(port io.ReadWriteCloser) *Client {
+	return &Client{port: port, ioCh: make(chan struct{}, 1)}
+}
+
+// acquireIO takes the serial-port lock with caller-visible cancellation.
+// A plain mutex here lets a long SMS poll hold the port beyond a dial's
+// deadline — the dial then only fails AFTER the lock frees (observed
+// 2026-09-06: reboot + unresponsive module → SMS poll pinned port 15s
+// → dial blocked 26s total → 500). With a buffered-channel lock the
+// dial returns promptly on its own deadline instead.
+func (c *Client) acquireIO(ctx context.Context) error {
+	select {
+	case c.ioCh <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) releaseIO() { <-c.ioCh }
 
 func (c *Client) SetLineHandler(handler func(string)) {
 	c.mu.Lock()
@@ -82,8 +101,10 @@ func (c *Client) SetDryRun(dryRun bool) {
 func (c *Client) Close() error { return c.port.Close() }
 
 func (c *Client) Exchange(ctx context.Context, command string) ([]string, error) {
-	c.ioMu.Lock()
-	defer c.ioMu.Unlock()
+	if err := c.acquireIO(ctx); err != nil {
+		return nil, err
+	}
+	defer c.releaseIO()
 	c.mu.Lock()
 	response, unsolicited, err := c.exchangeLocked(ctx, command)
 	handler := c.lineHandle
@@ -139,8 +160,10 @@ func (c *Client) exchangeLocked(ctx context.Context, command string) ([]string, 
 // sequence inside Client makes it atomic with respect to status and call
 // commands issued by other workers.
 func (c *Client) SendPDU(ctx context.Context, tpduLength int, pdu string) ([]string, error) {
-	c.ioMu.Lock()
-	defer c.ioMu.Unlock()
+	if err := c.acquireIO(ctx); err != nil {
+		return nil, err
+	}
+	defer c.releaseIO()
 	c.mu.Lock()
 	if tpduLength < 1 || strings.TrimSpace(pdu) == "" {
 		c.mu.Unlock()
@@ -179,8 +202,10 @@ func (c *Client) SendPDU(ctx context.Context, tpduLength int, pdu string) ([]str
 }
 
 func (c *Client) SendTextSMS(ctx context.Context, destination, body string) ([]string, error) {
-	c.ioMu.Lock()
-	defer c.ioMu.Unlock()
+	if err := c.acquireIO(ctx); err != nil {
+		return nil, err
+	}
+	defer c.releaseIO()
 	c.mu.Lock()
 	if strings.TrimSpace(destination) == "" || strings.TrimSpace(body) == "" {
 		c.mu.Unlock()
@@ -219,19 +244,25 @@ func (c *Client) SendTextSMS(ctx context.Context, destination, body string) ([]s
 }
 
 // Run drains unsolicited modem lines while the port is idle. A command
-// exchange and this idle reader share ioMu, so they never read the same byte
-// concurrently. The idle path performs one non-blocking read at a time and
-// releases ioMu between reads; holding the command/state mutex here would
-// otherwise starve every AT command while the modem is quiet.
+// exchange and this idle reader share the port lock (ioCh), so they
+// never read the same byte concurrently. The idle path performs one
+// non-blocking read at a time; if a command holds the lock it simply
+// skips this poll (lock is contended by design — never block URC reads
+// behind a command deadline).
 func (c *Client) Run(ctx context.Context) error {
 	buf := make([]byte, 256)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		c.ioMu.Lock()
-		n, err := readAvailable(c.port, buf)
-		c.ioMu.Unlock()
+		var n int
+		select {
+		case c.ioCh <- struct{}{}:
+			n, _ = readAvailable(c.port, buf)
+			<-c.ioCh
+		default:
+			// A command exchange owns the port; skip this poll.
+		}
 		var lines []string
 		if n > 0 {
 			c.mu.Lock()
@@ -246,23 +277,14 @@ func (c *Client) Run(ctx context.Context) error {
 				handler(line)
 			}
 		}
-		if err != nil {
-			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-				timer := time.NewTimer(10 * time.Millisecond)
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-					if !timer.Stop() {
-						<-timer.C
-					}
-					return ctx.Err()
-				}
-				continue
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
 			}
-			if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-			return fmt.Errorf("read unsolicited AT line: %w", err)
+			return ctx.Err()
 		}
 	}
 }

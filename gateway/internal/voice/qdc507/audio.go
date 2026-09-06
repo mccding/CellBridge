@@ -131,6 +131,7 @@ type Audio struct {
 	mu       sync.Mutex
 	call     modem.CallID
 	prepared      bool
+	lastRotate    time.Time
 	routePrepared bool
 	once     sync.Once
 }
@@ -278,6 +279,19 @@ func (a *Audio) ensureRuntime(ctx context.Context) error {
 		// had just re-created the route; every silent call followed a
 		// reused session. So each call explicitly re-rotates the route —
 		// never trust a cached "alive" session.
+		//
+		// But rotate only ONCE per call: PrepareRoute (pre-dial) already
+		// recreated the route seconds ago, and bridge.Start calls
+		// ensureRuntime again right after answer — a second rotation
+		// there doubles connect latency (observed 2026-09-06: dial→alert
+		// ~9s + answer→pair another ~4s). A route rotated within the
+		// last 30s is fresh enough to trust.
+		a.mu.Lock()
+		recent := time.Since(a.lastRotate) < 30*time.Second
+		a.mu.Unlock()
+		if recent {
+			return nil
+		}
 		slog.Info("QDC507 rotating voice route for call")
 		a.mu.Lock()
 		a.prepared = false
@@ -416,6 +430,9 @@ func (a *Audio) startRemoteRoute(ctx context.Context) error {
 		}
 		ready, _ := a.adb(ctx, transport, "shell", routeReadyScript())
 		if strings.TrimSpace(ready) == "ready" {
+			a.mu.Lock()
+			a.lastRotate = time.Now()
+			a.mu.Unlock()
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)

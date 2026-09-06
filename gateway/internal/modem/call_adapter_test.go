@@ -12,6 +12,7 @@ type fakeCallControl struct {
 }
 
 func (f *fakeCallControl) Probe(context.Context) (Capabilities, error) { return Capabilities{}, nil }
+func (f *fakeCallControl) WaitReady(context.Context) error              { return nil }
 func (f *fakeCallControl) Status(context.Context) (LineStatus, error)  { return LineStatus{}, nil }
 func (f *fakeCallControl) Dial(context.Context, string) (CallID, error) {
 	f.last = "physical-1"

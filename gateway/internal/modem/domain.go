@@ -23,6 +23,7 @@ var ErrActiveCall = errors.New("active modem call exists")
 type ModemControl interface {
 	Probe(context.Context) (Capabilities, error)
 	Status(context.Context) (LineStatus, error)
+	WaitReady(context.Context) error
 	Dial(context.Context, string) (CallID, error)
 	Answer(context.Context, CallID) error
 	Hangup(context.Context, CallID) error

@@ -113,6 +113,41 @@ func (a *Adapter) Status(ctx context.Context) (modem.LineStatus, error) {
 	return status, nil
 }
 
+// WaitReady polls the AT channel until the modem answers "AT" with
+// OK (or the context ends). After a NAS reboot the module's internal
+// system re-boots on its own schedule; waiting here turns a dial's
+// failure mode from "immediate 500" into "ring while the module
+// comes up".
+func (a *Adapter) WaitReady(ctx context.Context) error {
+	if a.client == nil {
+		return fmt.Errorf("AT client is unavailable")
+	}
+	// Each probe gets a short independent timeout so a hung port does
+	// not consume the whole ready budget.
+	deadline := 120 * time.Second
+	waitCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	attempt := 0
+	for {
+		if err := waitCtx.Err(); err != nil {
+			return fmt.Errorf("QDC507 AT channel not ready after %s: %w", deadline, err)
+		}
+		probeCtx, probeCancel := context.WithTimeout(waitCtx, 2*time.Second)
+		_, err := a.client.Exchange(probeCtx, "AT")
+		probeCancel()
+		if err == nil {
+			slog.Info("modem AT channel ready", "after_attempts", attempt+1)
+			return nil
+		}
+		attempt++
+		select {
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (a *Adapter) Dial(ctx context.Context, peer string) (modem.CallID, error) {
 	a.mu.Lock()
 	busy := a.active != ""
@@ -120,6 +155,13 @@ func (a *Adapter) Dial(ctx context.Context, peer string) (modem.CallID, error) {
 	if busy {
 		return "", modem.ErrActiveCall
 	}
+	// After a NAS reboot the module's internal system boots on its own
+	// schedule (USB re-enumeration + Android userspace, which can take
+	// minutes). Sending ATD into a not-yet-ready modem just burns the
+	// dial deadline and produces a 500 to the SIP client. The dial path
+	// calls WaitReady upfront (see SIPCallSession.Dial), so by the time
+	// we reach here the AT channel is known to answer; keep ATD's own
+	// deadline tight so a mid-dial hang still fails fast.
 	if _, err := a.client.Exchange(ctx, "ATD"+strings.TrimSpace(peer)+";"); err != nil {
 		return "", err
 	}

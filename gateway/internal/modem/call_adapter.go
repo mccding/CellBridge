@@ -32,6 +32,14 @@ func (a *ActiveCallAdapter) SetLogicalCallID(callID string) {
 	a.mu.Unlock()
 }
 
+// WaitReady waits until the modem's AT channel answers. Exposed for
+// dial-path sequencing (see SIPCallSession.Dial): a NAS reboot leaves
+// the module's userspace booting for minutes, and ATD/adb issued
+// before it is up only burn deadlines and produce SIP 500s.
+func (a *ActiveCallAdapter) WaitReady(ctx context.Context) error {
+	return a.Control.WaitReady(ctx)
+}
+
 func (a *ActiveCallAdapter) Dial(ctx context.Context, peer string) error {
 	callID, err := a.Control.Dial(ctx, peer)
 	if err != nil {
