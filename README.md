@@ -647,6 +647,8 @@ journalctl -u cellbridge-gateway -f | grep 'voice cellular stats'
 | 18 | 振铃中 180 后无 200 | 多轮叠加：路由回收时机/pid 转义/killall 残留/routePrepared 短路 | 前述 7/9/10 组合修复 |
 | 19 | 通话中"断断续续"（3-7 秒静音+突发补音） | iPhone RTP 经 Tailscale 的秒级毛刺 → aplay 瞬时饥饿 → **UAC ADAPTIVE 播放时钟停摆 → ASYNC 下行 capture 被节流**（50 帧窗口耗时 3-7 秒） | **上行 jitter buffer**：RTP 帧进 50 帧环形队列，固定 20ms 节拍器平滑写入 aplay；队列空写静音防 XRUN，满则丢最旧帧限延迟（bridge.go） |
 | 20 | 蜂窝方向偶发丢帧（帧率掉到 ~19fps） | UAC ASYNC capture 抖动超 ALSA 默认缓冲 | arecord/aplay 加 `--buffer-size=8192 --period-size=1024`（chan-quectel 同参数，60s 实测零丢帧） |
+| 21 | **重启后通话/短信全失效**（fnOS 等带系统 adb 的系统） | fnOS 开机自启系统 adb daemon（tcp:5037），**adb 的 USB transport 发现是单监听者**——系统 daemon 抢占后，gateway 自己的 adb 永远枚举不到模块（表现为拨号冻结、probe 报 "no ready ADB device"） | gateway 每个 adb 调用前自动 `pkill` 系统 adb daemon + 自建私网 daemon（`-L tcp:localhost:5038`）。**普通 Linux（Debian/群晖等）无系统 adb daemon，不会遇到此问题，修复对它们是无感兜底** |
+| 22 | 同 21 伴随：冷启动 probe 被 8s 超时掐断 → voice 降级 control-only | USB 重枚举 + adb server 冷启动超过 8 秒 | probe 超时升 30s；transportID 重试 8×750ms |
 
 ---
 
