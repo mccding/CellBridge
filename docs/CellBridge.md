@@ -84,12 +84,69 @@ ls -la /dev/ttyUSB*          # ttyUSB0(diag) ttyUSB1(nmea) ttyUSB2(AT) ...
 cat /proc/asound/cards       # 应出现 "BAIWANG Baiwang ... (USB Audio)" -> hw:0,0
 ```
 
-**QDC507 固件 UAC 必须开启**（一次性的）：
+**第一步：识别 AT 串口（可能不是 ttyUSB2！）**
+
+模块通过 USB 枚举出 4 个串口，角色固定：
+
+```text
+ttyUSB0 = Diag（诊断）
+ttyUSB1 = NMEA（GPS）
+ttyUSB2 = AT（拨号/短信/配置）   ← 绝大多数情况是 ttyUSB2
+ttyUSB3 = Modem（PPP 数据）
+```
+
+> ⚠️ **不要凭编号猜**：不同主板/USB Hub 的枚举顺序可能不同（有的 AT 口是 ttyUSB4、ttyUSB6）。**用命令识别，不要看编号**：
 
 ```bash
-# 通过 AT 口（ttyUSB2）执行；usbcfg 最后一位 = UAC 使能
-printf 'AT+QCFG="usbcfg",0x2C7C,0x0125,1,1,1,1,1,1,1\r' > /dev/ttyUSB2
-printf 'AT+CFUN=1,1\r' > /dev/ttyUSB2     # 重启射频子系统使配置生效（USB 会重枚举，约 15s）
+# 方法 1（推荐）：仓库自带脚本自动识别
+git clone https://github.com/mccding/CellBridge   # 若还没克隆
+./CellBridge/scripts/detect-at-port.sh            # 输出 AT 口路径，如 /dev/ttyUSB2
+
+# 方法 2（手动）：逐个串口发 AT 看谁回 OK
+for p in /dev/ttyUSB*; do
+  echo "--- $p ---"
+  (stty -F $p 9600 raw -echo; printf 'AT\r' > $p; timeout 1 cat $p) 2>/dev/null
+done
+# 输出中出现 "OK" 的那个口就是 AT 口
+
+# 方法 3（by-id 稳定路径，配好后重启不变）：
+ls -l /dev/serial/by-id/ | grep -E "if0[2-9]|if03"   # 找到 ...-if02-... 或 ...-if03-...
+# AT 口一般是 if02 或 if03 结尾的 by-id（BAIWANG_Baiwang-if02-port0 等）
+```
+
+确定 AT 口后，下文所有 AT 命令都用 `<AT口>` 表示（如 `/dev/ttyUSB2` 或 by-id 路径）。
+
+**第二步：解锁 adb（模块出厂默认关闭，只解锁一次）**
+
+QDC507 的 adb 出厂被锁定（`AT+QADBKEY` 挑战机制）。若模块从未开过 adb，需要厂商签发的 **15 字符解锁 key**（MD5-crypt 格式，向你的模块来源方索取；部分批次直接支持）：
+
+```bash
+# 1. 查询 adb 是否已解锁（返回 +QADBKEY: ... 即可用）
+printf 'AT+QADBKEY?\r' > <AT口>
+
+# 2. 若返回带挑战值且提示 locked，用 15 字符 key 解锁：
+printf 'AT+QADBKEY="你的15字符KEY"\r' > <AT口>
+
+# 3. 验证解锁成功（OK 或 +QADBKEY: 不再 locked）
+printf 'AT+QADBKEY?\r' > <AT口>
+```
+
+> key 是模块绑定的（每台模块不同），别人帮不了你——**向模块卖家/厂商要**。你的模块如果之前用 MaVo 开过 adb（设置里开过"ADB"开关），说明已解锁，跳过这一步。
+
+**第三步：开启 adb + UAC（usbcfg）并重启使生效**
+
+```bash
+# usbcfg 参数位：Dload,AT,Modem,NMEA,Diag,ADB,UAC —— 全 1 = 全开
+printf 'AT+QCFG="usbcfg",0x2C7C,0x0125,1,1,1,1,1,1,1\r' > <AT口>
+printf 'AT+CFUN=1,1\r' > <AT口>     # 重启射频子系统（USB 重枚举，约 15s）
+```
+
+重启后验证（应出现 adb 端口 + 音频设备）：
+
+```bash
+lsusb                     # 仍见 2C7C:0125
+adb devices -l            # 出现 QDC507 设备（transport usb:...）
+cat /proc/asound/cards    # 出现 BAIWANG ... (USB Audio) -> hw:0,0
 ```
 
 > ⚠️ **不要改 Tailscale / fnOS 系统配置**。模块工作模式固定 UAC+adb。
