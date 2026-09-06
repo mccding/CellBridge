@@ -243,6 +243,7 @@ After=network-online.target tailscaled.service docker.service
 Type=simple
 User=root
 EnvironmentFile=/mnt/docker-compose/cellbridge-gateway/turn.env
+# --listen 127.0.0.1 = HTTP API 仅绑定本机（安全）；外部统一走 tailnet 域名（Tailscale Serve 443 → 127.0.0.1:8787）
 ExecStart=/mnt/docker-compose/cellbridge-gateway/bin/cellbridge-gateway \
     --config /mnt/docker-compose/cellbridge-gateway/config.yaml \
     --listen 127.0.0.1:8787 \
@@ -287,7 +288,7 @@ network:
   tailnet_hostname: <你的NAS>.ts.net   # ← 换成你的 NAS ts.net 域名
   public_fallback: false
 server:
-  listen: 127.0.0.1:8787
+  listen: 127.0.0.1:8787   # HTTP API 仅绑定本机回环（安全默认）；外部一律经 tailnet 域名访问
   public_base_url: ""
 data:
   dir: /mnt/docker-compose/cellbridge-gateway/data
@@ -306,7 +307,7 @@ voice:
   runtime_dir: /opt/cellbridge/module-voice
 sip:
   enabled: true
-  listen: 0.0.0.0:5060
+  listen: 0.0.0.0:5060   # SIP 监听所有网卡（tailnet 客户端经 ts.net 域名连入）；0.0.0.0 = 绑定地址, 非连接目标
   realm: cellbridge
   push_token: "<你的 YakPhone 推送 token>"      # [REDACTED in repo example]
   users:
@@ -439,7 +440,7 @@ NAS → 200 OK
 
 **SMS PDU 样例**（长号 185...）：`0001000B818155118865F50008044F60597D`（"你好"）。短号走文本模式避开 PDU `>` 提示符被 tty 抢占的问题。
 
-**HTTP API 发送**（等价于 MESSAGE，供脚本/集成用）：
+**HTTP API 发送**（等价于 MESSAGE，供脚本/集成用；在 NAS 本机执行时用 127.0.0.1，远程统一走 tailnet 域名）：
 
 ```bash
 curl -X POST http://127.0.0.1:8787/api/v1/messages \
