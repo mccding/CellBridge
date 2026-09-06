@@ -116,32 +116,36 @@ ls -l /dev/serial/by-id/ | grep -E "if0[2-9]|if03"   # 找到 ...-if02-... 或 .
 
 确定 AT 口后，下文所有 AT 命令都用 `<AT口>` 表示（如 `/dev/ttyUSB2` 或 by-id 路径）。
 
-**第二步：解锁 adb root（第一步必须做！= 写 usbcfg 开启 adb）**
+**第二步：解锁 adb root（新用户模块出厂锁定，必须先做！）**
 
-模块出厂 **adb 未开启**（usbcfg 里 adb 位=0），此时 `adb devices` 看不到设备。**解锁 adb root = 用 AT 命令开启 usbcfg 的 adb+UAC 位并重启**——开启后 adbd 直接以 root 运行（实测 `adb shell id -u` → `0`），gateway 才能推送运行时、insmod 内核模块：
+模块出厂 **adb 被 QADBKEY 挑战锁住**——`AT+QADBKEY?` 返回一个 8 位随机挑战值（如 `+QADBKEY: 12345678`），不解锁的话 `adb devices` 看不到设备、usbcfg 写 adb 位会被拒。
 
-```bash
-# usbcfg 参数位：Dload,AT,Modem,NMEA,Diag,ADB,UAC —— 全 1 = 全开
-printf 'AT+QCFG="usbcfg",0x2C7C,0x0125,1,1,1,1,1,1,1\r' > <AT口>
-printf 'AT+CFUN=1,1\r' > <AT口>     # 重启射频子系统（USB 重枚举，约 15s）
-```
+**解锁方法是公开的**：高通模块的 QADBKEY 挑战-应答使用**固定密钥 `SH_adb_quectel`**（见 [dji-voice-go/qadbkey.go](https://github.com/iniwex5/dji-voice-go) 等开源实现）——用 glibc MD5-crypt（`$1$<challenge>$`）对固定密钥计算哈希，取 22 字符哈希段作为解锁密码，`AT+QADBKEY="<密码>"` 即解锁成功，**持久生效（跨重启，只需一次）**。
 
-**一键完成**（自动识别 AT 口 → 写 usbcfg → 重启）：
+**一键完成（自动识别 AT 口 → 自动解锁 adb root → 写 usbcfg 7×1 → 重启）**：
 
 ```bash
-./scripts/init-module.sh                       # 一键解锁 adb root（默认无需 key）
-./scripts/init-module.sh /dev/ttyUSB2          # 指定 AT 口
-./scripts/init-module.sh --check               # 只查状态不写
+./scripts/init-module.sh             # 一键：出厂锁定模块也直接解锁+开启
+./scripts/init-module.sh /dev/ttyUSB2   # 指定 AT 口
+./scripts/init-module.sh --check     # 只查状态不写
 ```
 
-解锁后验证 adb root（两条都过 = 解锁成功）：
+手动等价步骤（了解原理用）：
 
 ```bash
-adb devices -l          # 出现 QDC507 设备
-adb shell id -u         # 输出 0（root）——gateway 依赖此项，非 root 无法工作
+# 1. 取挑战值
+AT+QADBKEY?                          # → +QADBKEY: 12345678
+# 2. 计算解锁密码 = MD5-crypt(SH_adb_quectel, $1$12345678$) 的 22 字符哈希段
+#    可用 openssl passwd -1 -salt 12345678 SH_adb_quectel 得到 $1$12345678$UnSn...，
+#    密码就是 "UnSn..." 部分（22 字符）
+# 3. 解锁（持久生效）
+AT+QADBKEY="<YOUR-22-char-password>"  # → OK
+# 4. 验证：adb devices 出现设备
 ```
 
-> **极少数例外**：DJI 原厂锁定批次的模块，写 usbcfg 时可能被拒（返回 ERROR/lock）。此时需厂商签发的 15 字符 key（`AT+QADBKEY="KEY"` 解锁后重写）。**绝大多数 Baiwang 固件模块不需要**——MaVo 的一键初始化同样没有 key 环节，直接写 usbcfg。
+解锁后 adb 以 **root** 运行（`adb shell id -u` → `0`），gateway 才能推送运行时、insmod 内核模块。
+
+> 已解锁的模块重复执行解锁指令会返回非 OK（拒绝重复解锁）——正常，脚本会跳过。**你的模块如果之前开过 adb，直接跑脚本即可，它会自动检测并跳过。**
 
 重启后验证（应出现 adb 端口 + 音频设备）：
 

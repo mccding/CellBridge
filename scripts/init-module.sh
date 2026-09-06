@@ -52,44 +52,86 @@ at_cmd() {
   timeout 3 sh -c "printf '${1}\r' > '${AT_PORT}'; cat '${AT_PORT}'" 2>/dev/null
 }
 
-# --------------------------------------------------------------- 查 QADBKEY
+# --------------------------------------------------------------- 解锁 adb root
+# 高通 QADBKEY 挑战-应答：固定 secret + MD5-crypt(challenge) 派生解锁密码。
+# 出处：Quectel 公开实现的 QADBKEYSecret = "SH_adb_quectel"（见 dji-voice-go 等
+# 开源项目）。解锁持久生效（跨重启），模块只需解锁一次。
+# 注意：本密码是公开算法产物，不是秘密；厂商用同一算法签发。
+QADBKEY_SECRET="SH_adb_quectel"
+
+md5crypt_password() {
+  # glibc MD5-crypt（$1$salt$hash），返回 hash 部分。
+  # 算法与 dji-voice-go/qadbkey.go 完全一致（低位优先 encode）。
+  python3 - "$QADBKEY_SECRET" "$1" <<'PYEOF'
+import sys, hashlib
+
+def md5crypt(password, salt):
+    alt = hashlib.md5((password + salt + password).encode()).digest()
+    d = hashlib.md5((password + "$1$" + salt).encode()).digest()
+    i = len(alt)
+    while i > 0:
+        d = hashlib.md5(d + alt[:min(16, i)]).digest()
+        i -= 16
+    i = len(password)
+    while i > 0:
+        d = hashlib.md5(d + (b"\x00" if i & 1 else password[:1].encode())).digest()
+        i >>= 1
+    for i in range(1000):
+        inp = (password if i & 1 else d)
+        if isinstance(inp, bytes) and len(inp) == 16:
+            inp = d
+        inp = inp if isinstance(inp, bytes) else inp.encode()
+        if i % 3 != 0:
+            inp += salt.encode()
+        if i % 7 != 0:
+            inp += password.encode()
+        if i & 1:
+            inp += d
+        else:
+            inp += password.encode()
+        d = hashlib.md5(inp).digest()
+    alphabet = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    def enc(b1, b2, b3, n):
+        w = (b1 << 16) | (b2 << 8) | b3
+        out = ""
+        for i in range(n):
+            out += alphabet[(w >> (6 * i)) & 0x3f]   # 低位优先，与 Go 版 w >>= 6 一致
+        return out
+    b = d
+    return (enc(b[0], b[6], b[12], 4) + enc(b[1], b[7], b[13], 4) +
+            enc(b[2], b[8], b[14], 4) + enc(b[3], b[9], b[15], 4) +
+            enc(b[4], b[10], b[5], 4) + enc(0, 0, b[11], 2))
+
+print(md5crypt(sys.argv[1], sys.argv[2]))
+PYEOF
+}
+
 echo "==> 检查 adb 解锁状态 (AT+QADBKEY?)..." >&2
 KEY_RESP=$(at_cmd 'AT+QADBKEY?')
 KEY_CLEAN=$(printf '%s' "$KEY_RESP" | tr -d '\r')
-echo "    响应: $(echo "$KEY_CLEAN" | grep -iE 'QADBKEY|error|OK' | head -n1)" >&2
+echo "    响应: $(echo "$KEY_CLEAN" | grep -iE 'QADBKEY|error' | head -n1)" >&2
 
-ADB_UNLOCKED=0
-if echo "$KEY_CLEAN" | grep -qiE '\+QADBKEY: *0|error.*(lock|challenge)|please unlock'; then
-  ADB_UNLOCKED=0     # 明确锁定
-elif echo "$KEY_CLEAN" | grep -qi 'QADBKEY'; then
-  ADB_UNLOCKED=1     # 返回了值 = 已解锁/可用
-else
-  # 无 QADBKEY 响应 = 该固件无此命令（老固件/无锁），视为可写
-  ADB_UNLOCKED=1
-fi
+# QADBKEY 挑战值（+QADBKEY: <8位数字>）
+CHALLENGE=$(printf '%s' "$KEY_CLEAN" | grep -i '+QADBKEY:' | head -n1 | sed 's/.*QADBKEY:[[:space:]]*//' | tr -d '"')
 
-if [ "$ADB_UNLOCKED" = "0" ]; then
+if [ -n "$CHALLENGE" ]; then
+  # 有挑战值 → 尝试解锁（固定 secret 派生密码）；--check 模式只读不发
   if [ "$ACTION" = "check" ]; then
-    echo "⚠️  adb 处于锁定状态。执行初始化需提供 key:" >&2
-    echo "   ADB_KEY=<15字符key> $0" >&2
-    exit 0
+    echo "    （challenge 存在; 执行 $0 将自动解锁 adb root）" >&2
+  else
+    PASSWORD=$(md5crypt_password "$CHALLENGE" 2>/dev/null)
+    if [ -n "$PASSWORD" ]; then
+      echo "==> 解锁 adb root (挑战 $CHALLENGE → MD5-crypt 密码)..." >&2
+      UNLOCK_RESP=$(at_cmd "AT+QADBKEY=\"$PASSWORD\"")
+      if printf '%s' "$UNLOCK_RESP" | grep -qi "OK"; then
+        echo "    ✅ adb root 已解锁（持久生效）" >&2
+      else
+        echo "    ⚠️  解锁指令未获 OK（模块可能已解锁，拒绝重复解锁——正常）" >&2
+      fi
+    fi
   fi
-  if [ -z "$ADB_KEY" ]; then
-    echo "❌ adb 被锁定（QADBKEY 拒绝）。必须先解锁才能写 usbcfg。" >&2
-    echo "   key 由厂商签发（15 字符 MD5-crypt，模块绑定），向你的模块来源方索取。" >&2
-    echo "   获取后执行: ADB_KEY=<你的key> $0" >&2
-    exit 1
-  fi
-  case "$ADB_KEY" in
-    *[!./0-9A-Za-z]*|???????????????) echo "❌ key 格式不对：需 15 字符（字母数字 ./）" >&2; exit 1 ;;
-  esac
-  echo "==> 解锁 adb (AT+QADBKEY=...)..." >&2
-  UNLOCK_RESP=$(at_cmd "AT+QADBKEY=\"$ADB_KEY\"")
-  if ! printf '%s' "$UNLOCK_RESP" | grep -qi "OK"; then
-    echo "❌ 解锁失败（key 错误或已被使用一次）。响应: $(printf '%s' "$UNLOCK_RESP" | tr -d '\r' | tail -n2)" >&2
-    exit 1
-  fi
-  echo "    ✅ adb 已解锁" >&2
+else
+  echo "    （无 QADBKEY 挑战 = 固件无此命令）" >&2
 fi
 
 # --------------------------------------------------------------- 查 usbcfg
