@@ -352,7 +352,8 @@ security:
 
 ## 7. YakPhone 客户端配置
 
-1. App Store 安装 **Yak – AI SIP Phone**（baresip 内核）。
+1. App Store 安装 **Yak – AI SIP Phone**（baresip 内核）：
+   👉 [https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863](https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863)（免费）
 2. 账号设置：
    - **服务器**：`<你的NAS>.ts.net:5060`
    - **用户名**：`1001`；**密码**：与 config 一致

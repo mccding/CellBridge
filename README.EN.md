@@ -72,7 +72,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 - **QDC507** 4G module (DJI 1st-gen, BAIWANG USB firmware, adb-enabled) + active SIM with VoLTE
 - **NAS** (arm64 or amd64 Linux) with USB and Tailscale
-- **iPhone** with **YakPhone** and a **push token** (obtained from the YakPhone provider)
+- **iPhone** with **YakPhone** ([App Store](https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863) — Yak AI SIP Phone, free) and a **push token** (obtained from the YakPhone provider)
 
 > ⚠️ The module-side voice runtime (`qdc507_aprv3.ko`, `qdc507_voice.ko`, `mavo-pcm-bridge`) is vendor-closed-source. It is **not** distributed in this repo; see `docs/CellBridge.md` §2.
 

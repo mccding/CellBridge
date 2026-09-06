@@ -72,7 +72,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 - **QDC507** 4G 模块（大疆一代，BAIWANG USB 固件，带 adb）+ 已开通 VoLTE 的实体 SIM
 - **NAS**（arm64 或 amd64 Linux），带 USB 口和 Tailscale
-- **iPhone** + **YakPhone** + **push token**（从 YakPhone 服务商处获取）
+- **iPhone** + **YakPhone**（[App Store 下载](https://apps.apple.com/in/app/yak-ai-sip-phone/id6763033863) — Yak AI SIP Phone，免费）+ **push token**（从 YakPhone 服务商处获取）
 
 > ⚠️ 模块侧语音运行时（`qdc507_aprv3.ko`、`qdc507_voice.ko`、`mavo-pcm-bridge`）为厂商闭源软件，**不随本仓库分发**；获取方式见 `docs/CellBridge.md` §2。
 
