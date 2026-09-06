@@ -3,7 +3,7 @@
 # CellBridge 一键部署脚本（build + upload + replace + restart）
 #
 # 用法:
-#   ./scripts/deploy.sh                     # NAS 默认 nasanysim
+#   ./scripts/deploy.sh                     # NAS 默认 <your-mas>
 #   NAS_HOST=my-nas ./scripts/deploy.sh     # 指定 NAS
 #   ./scripts/deploy.sh --no-build          # 跳过编译, 只部署已有产物
 #
@@ -14,7 +14,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-NAS_HOST="${NAS_HOST:-nasanysim}"
+NAS_HOST="${NAS_HOST:-my-nas}"                      # ← 改为你 NAS 的 tailnet 主机名
 REMOTE_BIN=/mnt/docker-compose/cellbridge-gateway/bin/cellbridge-gateway
 LOCAL_BIN=artifacts/cellbridge-gateway-linux-arm64
 

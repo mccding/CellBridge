@@ -227,7 +227,7 @@ go test ./...        # 覆盖：RTP 时序、SIP 重传去重、SMS dry-run(CMGW
 仓库自带 `scripts/deploy.sh`——**编译 → 备份 → 上传 → 替换 → 重启 → 验证** 一条命令完成：
 
 ```bash
-./scripts/deploy.sh                      # 默认部署到 nasanysim（tailnet SSH）
+./scripts/deploy.sh                      # 默认部署到 <你的NAS>（tailnet SSH 主机名）
 NAS_HOST=my-nas ./scripts/deploy.sh      # 指定 NAS 主机名
 ./scripts/deploy.sh --no-build           # 跳过编译，只上传已有产物
 ```
